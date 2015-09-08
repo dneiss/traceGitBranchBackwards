@@ -1,8 +1,8 @@
 #!/usr/bin/env python
-    
+
 # Python script to traverse GIT DAG backwards in time, tracing a branch
 # through merges and emitting merge parents that are not the desired
-# branch for the purpose of building a set of commits to pass to 
+# branch for the purpose of building a set of commits to pass to
 # 'git bisect good' so that we can use git bisect and omit all
 # paths that are not part of the desired branch.
 
@@ -10,23 +10,25 @@ import re
 import sys
 import subprocess
 
+# TBD deal with running script outside of repo dir
+
 
 def IsValidCommit(commit):
    sp = subprocess.Popen(["git","cat-file",'-e',commit+'^0'],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
    sp.wait()
    return sp.returncode == 0
-   
+
 
 def IsReachable(commit, fromCommit):
    sp = subprocess.Popen(["git","merge-base",'--is-ancestor',commit,fromCommit],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
    sp.wait()
    return sp.returncode == 0
-   
-   
+
+
 def GetParents(commit):
    sp = subprocess.Popen(["git","log",'--pretty="%p"','-1',commit],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-   o1 = sp.communicate()[0]   
-   o2 = str.replace(o1,'"','')   
+   o1 = sp.communicate()[0]
+   o2 = str.replace(o1,'"','')
    o3 = o2.split()
    return o3
 
@@ -35,7 +37,7 @@ def GetCommitComments(commit):
    sp = subprocess.Popen(["git","log",'--format="%B"','-1',commit],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
    o1 = sp.communicate()[0]
    return o1.rstrip()
-   
+
 
 # Returns (parentOnSameBranch, otherParent)
 p1 = re.compile("Merge branch '.+'")
@@ -48,7 +50,7 @@ def ParseMergeCommitCommentsForParentOnSameBranch(commit,branchName):
     if len(p) == 1:
        sys.stderr.write("Internal error, on commit %s that I thought was a merge, but its only got one parent (so can't be a merge). Bailing\n" % commit)
        sys.exit(-1)
-       
+
     if len(p) > 2:
        sys.stderr.write("ERROR - merge commit %s has more than two parents. Haven't updated code for octopus merges yet\n" % commit)
        sys.exit(-1)
@@ -73,11 +75,11 @@ def ParseMergeCommitCommentsForParentOnSameBranch(commit,branchName):
           secondQuote = c.index("'",firstQuote+1)
           mergedInBranchName = c[firstQuote+1:secondQuote]
           break
-    
+
     if mergedInBranchName is None:
         sys.stderr.write("ERROR - cant figure out from commit comment which parent is the branch we are trying to follow. Bailing\n")
         sys.exit(-1)
-        
+
     if branchName == mergedInBranchName:
         return (p[1],p[0])
     else:
@@ -90,13 +92,17 @@ def FollowParent(commit, branchName):
       return None
    if len(parents) == 1:
       return (parents[0],None)
-      
-   # Ok, now we have a merge commit, so figure out its parent from the commit comments
+   # We have a merge commit so figure out its parent from the commit comments
    return ParseMergeCommitCommentsForParentOnSameBranch(commit,branchName)
 
 
+
+
 if len(sys.argv) != 4:
-    sys.stderr.write("Must be invoked with three parameters, the first is the starting commit and the second is the ancestor commit to iterate to and the third is the branchName of the starting commit to follow to the ancestor commit\n")
+    sys.stderr.write("Usage: followBranch.py startingCommit endAncestorCommit branchName\n")
+    sys.stderr.write("Must be invoked with three parameters, the first is the starting commit,\n")
+    sys.stderr.write(" the second is the ancestor commit to iterate to, and the third is the\n")
+    sys.stderr.write(" branch name of the starting commit to follow to the ancestor commit\n")
     sys.exit(-1)
 
 startingCommit = sys.argv[1]
@@ -110,7 +116,7 @@ if not IsValidCommit(startingCommit):
 if not IsValidCommit(endingCommit):
     sys.stderr.write("Ending commit '%s' isn't a valid SHA1 for a commit\n" % endingCommit)
     sys.exit(-1)
-    
+
 # TBD verify startingCommit is in branchName
 
 if not IsReachable(endingCommit, startingCommit):
@@ -121,13 +127,16 @@ if not IsReachable(endingCommit, startingCommit):
 discardedMergeHead = set()
 nextCommit = startingCommit
 
+print "Commits followed:"
 while nextCommit is not None and not nextCommit.startswith(endingCommit):
    parentCommit = FollowParent(nextCommit,branchName)
+   if parentCommit is None:
+      break
    if parentCommit[1] is not None:
       discardedMergeHead.add(parentCommit[1])
    print parentCommit[0]
    nextCommit = parentCommit[0]
-   
-print "Discarded heads:" 
+
+print "Merge heads to discard:"
 print("".join(str(x)+' ' for x in discardedMergeHead))
 
